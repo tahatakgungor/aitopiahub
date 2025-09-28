@@ -8,4 +8,4 @@ def get_trends(driver):
     trends_elements = driver.find_elements(By.XPATH, '//span[contains(text(), "#")]')
     trends = [t.text for t in trends_elements]
 
-    return trends[:10]  # İlk 10 trendi al
+    return trends[:10]  # İlk 10 trend
