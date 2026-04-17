@@ -28,3 +28,4 @@ minio_data/
 .DS_Store
 .vscode/
 .idea/
+PROGRESS_LOG.md
