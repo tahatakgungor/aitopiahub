@@ -1,0 +1,27 @@
+# Secrets
+.env
+.env.*
+.env.accounts/
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Data
+data/
+*.log
+
+# Docker volumes
+postgres_data/
+redis_data/
+minio_data/
+
+# OS
+.DS_Store

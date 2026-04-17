@@ -1,0 +1,81 @@
+# Aitopiahub News — AI & Teknoloji Haberleri
+# configs/base.yaml değerlerini override eder
+
+niche: news
+language_primary: tr
+language_secondary: en
+timezone: "Europe/Istanbul"
+
+scheduling:
+  default_posts_per_day: 8
+  peak_hours: [12, 17, 20, 22]
+  min_gap_minutes: 60
+  strict_peak_hours: true
+  bootstrap_hours: 48
+  bootstrap_posts_per_day: 4
+
+content_engine:
+  min_publish_quality_score: 78
+
+monetization:
+  enabled: true
+  affiliate_ratio_max: 0.30
+  min_quality_for_affiliate: 82
+  default_utm_campaign: "aitopiahub_news_launch"
+  requires_manual_approval_days: 14
+  signup_value_estimate: 2.5
+
+llm:
+  system_prompt_variant: news_authoritative
+
+image:
+  style_preset: tech_modern
+  generate_probability: 0.70   # News: görsel önemli, biraz artır
+
+topics:
+  seed_keywords:
+    # Türkçe
+    - "yapay zeka"
+    - "ChatGPT"
+    - "Gemini"
+    - "yapay zeka haberleri"
+    - "teknoloji"
+    - "robotlar"
+    - "GPT"
+    # İngilizce
+    - "artificial intelligence"
+    - "machine learning"
+    - "deep learning"
+    - "OpenAI"
+    - "Anthropic"
+    - "Claude"
+    - "LLM"
+    - "generative AI"
+    - "neural network"
+    - "autonomous AI"
+    - "AI agent"
+
+  blocked_keywords:
+    - "crypto"
+    - "NFT"
+    - "bitcoin"
+    - "şiddet"
+    - "siyaset"
+    - "seçim"
+
+  subreddits:
+    - artificial
+    - MachineLearning
+    - technology
+    - singularity
+    - OpenAI
+    - ChatGPT
+    - LocalLLaMA
+
+hashtags:
+  strategy: mixed  # large + medium + small karışımı
+  max_count: 18
+  always_include:
+    - AItopiahub
+    - YapayZeka
+    - AI

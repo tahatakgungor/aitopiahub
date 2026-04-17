@@ -1,0 +1,130 @@
+version: "3.9"
+
+x-app-base: &app-base
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile.app
+  env_file:
+    - ../.env
+  volumes:
+    - ../src:/app/src
+    - ../configs:/app/configs
+    - ../assets:/app/assets
+    - ../data:/app/data
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  # ── Admin API ──────────────────────────────────────────────
+  app:
+    <<: *app-base
+    container_name: aitopiahub_app
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    command: uvicorn aitopiahub.api.app:app --host 0.0.0.0 --port 8000 --reload
+
+  # ── Celery Workers ─────────────────────────────────────────
+  worker_trend:
+    <<: *app-base
+    container_name: aitopiahub_worker_trend
+    command: celery -A aitopiahub.tasks.celery_app worker -Q trend -c 2 -n trend@%h
+
+  worker_content:
+    <<: *app-base
+    container_name: aitopiahub_worker_content
+    command: celery -A aitopiahub.tasks.celery_app worker -Q content -c 2 -n content@%h
+
+  worker_publish:
+    <<: *app-base
+    container_name: aitopiahub_worker_publish
+    command: celery -A aitopiahub.tasks.celery_app worker -Q publish,engagement -c 1 -n publish@%h
+
+  # ── Celery Beat (tek instance!) ────────────────────────────
+  beat:
+    <<: *app-base
+    container_name: aitopiahub_beat
+    command: celery -A aitopiahub.tasks.celery_app beat --scheduler redbeat.RedBeatScheduler -l info
+
+  # ── Veritabanı ─────────────────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: aitopiahub_postgres
+    environment:
+      POSTGRES_DB: aitopiahub
+      POSTGRES_USER: aitopiahub
+      POSTGRES_PASSWORD: aitopiahub
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aitopiahub"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Redis ──────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: aitopiahub_redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ── MinIO (Local S3 — Görsel Depolama) ─────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: aitopiahub_minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+  # ── Prometheus ─────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: aitopiahub_prometheus
+    volumes:
+      - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  # ── Grafana ────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: aitopiahub_grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ../monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  grafana_data:

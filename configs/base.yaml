@@ -1,0 +1,51 @@
+# Global varsayılan konfigürasyon
+# Hesap-özel YAML'lar bu değerleri override eder
+
+llm:
+  generation_model: llama-3.3-70b-versatile
+  fast_model: llama-3.1-8b-instant
+  max_tokens: 800
+  temperature: 0.85
+
+scheduling:
+  default_posts_per_day: 8
+  posting_window_start: "07:00"
+  posting_window_end: "23:00"
+  min_gap_minutes: 60
+  peak_hours: [9, 12, 17, 20, 22]
+  strict_peak_hours: true
+  bootstrap_hours: 48
+  bootstrap_posts_per_day: 4
+  timezone: "Europe/Istanbul"
+
+trend_engine:
+  fetch_interval_minutes: 15
+  min_trend_score: 0.35
+  max_trends_per_cycle: 5
+  trend_ttl_hours: 6
+
+content_engine:
+  min_quality_score: 75
+  min_publish_quality_score: 78
+  min_safety_score: 85
+  ab_test_ratio: 0.3
+  duplicate_similarity_threshold: 0.88
+  max_revision_iterations: 2
+
+monetization:
+  enabled: true
+  affiliate_ratio_max: 0.30
+  min_quality_for_affiliate: 82
+  default_utm_campaign: "aitopiahub_launch"
+  requires_manual_approval_days: 14
+  signup_value_estimate: 2.5
+
+image:
+  generate_probability: 0.65
+  carousel_max_slides: 7
+  carousel_min_slides: 3
+  size: portrait  # portrait (1080x1350) veya square (1080x1080)
+
+rate_limits:
+  instagram_posts_per_15min: 5
+  groq_rpm: 30
