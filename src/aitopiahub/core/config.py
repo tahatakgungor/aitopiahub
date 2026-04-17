@@ -98,6 +98,11 @@ class Settings(BaseSettings):
     # Ollama
     ollama_base_url: str = "http://localhost:11434"
 
+    # YouTube
+    youtube_client_id: str = ""
+    youtube_client_secret: str = ""
+    youtube_refresh_token: str = ""
+
     # Instagram
     instagram_app_id: str = ""
     instagram_app_secret: str = ""
@@ -201,7 +206,7 @@ class AccountConfig:
                     key, _, val = line.partition("=")
                     os.environ.setdefault(key.strip(), val.strip())
 
-    @lru_cache(maxsize=None)
     @staticmethod
+    @lru_cache(maxsize=None)
     def for_account(handle: str) -> "AccountConfig":
         return AccountConfig(handle)

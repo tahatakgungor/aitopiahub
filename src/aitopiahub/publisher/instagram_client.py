@@ -167,6 +167,51 @@ class InstagramClient:
                 raise PublishError(f"Carousel container oluşturulamadı: {data['error']}")
             return data["id"]
 
+    @retry(
+        wait=wait_exponential(multiplier=2, min=10, max=120),
+        stop=stop_after_attempt(3),
+        reraise=True,
+    )
+    async def publish_reel(
+        self,
+        video_url: str,
+        caption: str,
+    ) -> PublishResult:
+        """Video dosyasını Instagram Reels olarak yayınlar."""
+        async with aiohttp.ClientSession(timeout=self._timeout) as session:
+            # Adım 1: Video container oluştur
+            container_id = await self._create_video_container(session, video_url, caption)
+            
+            # Adım 2: Wait for video processing (Meta API specific)
+            # Genelde 15-30 saniye sürer. Loop ile status kontrolü yapılabilir ama şimdilik sleep+retry.
+            log.info("reels_processing_wait", container_id=container_id)
+            await asyncio.sleep(20)
+
+            # Adım 3: Yayınla
+            media_id = await self._publish_container(session, container_id)
+
+        log.info("instagram_reel_published", media_id=media_id)
+        return PublishResult(media_id=media_id)
+
+    async def _create_video_container(
+        self,
+        session: aiohttp.ClientSession,
+        video_url: str,
+        caption: str,
+    ) -> str:
+        url = f"{GRAPH_BASE}/{self._account_id}/media"
+        payload = {
+            "media_type": "REELS",
+            "video_url": video_url,
+            "caption": caption,
+            "access_token": self._token,
+        }
+        async with session.post(url, data=payload) as resp:
+            data = await resp.json()
+            if "error" in data:
+                raise PublishError(f"Video container oluşturulamadı: {data['error']}")
+            return data["id"]
+
     async def _publish_container(
         self, session: aiohttp.ClientSession, container_id: str
     ) -> str:
@@ -178,5 +223,6 @@ class InstagramClient:
         async with session.post(url, data=payload) as resp:
             data = await resp.json()
             if "error" in data:
-                raise PublishError(f"Yayınlama başarısız: {data['error']}")
+                # Reels bazen processing aşamasında olduğu için hata verebilir, retry burada devreye girer.
+                raise PublishError(f"Yayınlama başarısız (Processing olabilir): {data['error']}")
             return data["id"]

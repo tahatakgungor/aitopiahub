@@ -96,13 +96,16 @@ Kurallar:
         self, slides: list[dict]
     ) -> tuple[list[dict], list[dict]]:
         slides_json = str(slides)
-        prompt = f"""Carousel slaytları:
+        prompt = f"""İçerik (Slaytlar veya Video Sahneleri):
 {slides_json[:1500]}
 
-Her slaytı hem Türkçe hem İngilizce adapte et. JSON döndür:
+Bu içeriği hem Türkçe hem İngilizce adapte et. 
+Önemli: Eğer bu bir video senaryosu ise (her objede 'image_prompt' varsa), bu alanları ASLA çevirme, olduğu gibi koru. Sadece 'text' veya 'headline' gibi metin alanlarını adapte et.
+
+JSON döndür:
 {{
-  "tr_slides": [/* Türkçe slaytlar, aynı yapıda */],
-  "en_slides": [/* English slides, same structure */]
+  "tr_slides": [/* Türkçe versiyonlar, aynı JSON yapısında ve aynı sayıda obje */],
+  "en_slides": [/* English versions, same JSON structure and count */]
 }}"""
 
         try:
@@ -110,7 +113,7 @@ Her slaytı hem Türkçe hem İngilizce adapte et. JSON döndür:
                 prompt,
                 system=self.SYSTEM_PROMPT,
                 model=ModelTier.QUALITY,
-                max_tokens=1200,
+                max_tokens=2000,
             )
             return data.get("tr_slides", slides), data.get("en_slides", slides)
         except Exception as e:

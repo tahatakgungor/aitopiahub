@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import io
 import textwrap
-from enum import StrEnum
+from enum import Enum
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -40,7 +40,7 @@ INSTAGRAM_SIZES = {
 }
 
 
-class TemplateType(StrEnum):
+class TemplateType(str, Enum):
     BREAKING_NEWS = "breaking_news"
     ANALYSIS = "analysis"
     STAT_CARD = "stat_card"

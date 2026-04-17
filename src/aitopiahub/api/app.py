@@ -49,10 +49,14 @@ def create_app() -> FastAPI:
     metrics_app = make_asgi_app()
     app.mount("/metrics", metrics_app)
 
-    # Local image storage'ı public olarak servis et
+    # Local storage'ı public olarak servis et
     images_dir = Path(settings.storage_local_path).resolve()
     images_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/images", StaticFiles(directory=str(images_dir)), name="images")
+
+    videos_dir = Path("./data/videos").resolve()
+    videos_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/videos", StaticFiles(directory=str(videos_dir)), name="videos")
 
     return app
 

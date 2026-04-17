@@ -47,6 +47,25 @@ app.conf.update(
     redbeat_lock_timeout=60 * 5,  # 5 dakika
 )
 
+# Beat Schedule Konfigürasyonu
+app.conf.beat_schedule = {
+    "autonomous_kids_hub_cycle": {
+        "task": "aitopiahub.tasks.content_tasks.run_autonomous_kids_cycle",
+        "schedule": 86400.0, # Günde bir kez (veya crontab ile 10:00)
+        "args": ("aitopiahub_kids",),
+    },
+    "trend_hunt_scout": {
+        "task": "aitopiahub.tasks.trend_tasks.fetch_and_score_trends",
+        "schedule": 14400.0, # Her 4 saatte bir
+        "args": ("aitopiahub_kids",),
+    },
+    "self_improvement_feedback": {
+        "task": "aitopiahub.tasks.content_tasks.run_self_improvement",
+        "schedule": 604800.0, # Haftada bir
+        "args": ("aitopiahub_kids",),
+    },
+}
+
 # Task'ları auto-discover
 app.autodiscover_tasks([
     "aitopiahub.tasks.trend_tasks",

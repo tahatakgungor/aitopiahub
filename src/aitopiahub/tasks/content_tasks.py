@@ -197,6 +197,11 @@ async def _generate_async(account_handle: str) -> dict:
                 }
                 target_queue = f"review_drafts:{account_handle}" if approval_mode else f"ready_drafts:{account_handle}"
                 await redis.rpush(target_queue, json.dumps(draft_data))
+                
+                # YouTube Phase-2 Integration: Trigger video generation
+                from aitopiahub.tasks.youtube_tasks import generate_and_publish_shorts
+                generate_and_publish_shorts.delay(account_handle, json.dumps(draft_data))
+
                 generated_count += 1
                 log.info(
                     "draft_queued",
@@ -204,6 +209,7 @@ async def _generate_async(account_handle: str) -> dict:
                     variant=post.variant_label,
                     approval_mode=approval_mode,
                     affiliate=bool(affiliate_meta),
+                    youtube_triggered=True
                 )
 
     log.info("content_pipeline_done", account=account_handle, generated=generated_count)
@@ -361,3 +367,17 @@ async def _cadence_allows_affiliate(redis, account_handle: str) -> bool:
     index = await redis.incr(key)
     await redis.expire(key, 30 * 86400)
     return index % 3 == 0
+@app.task(name="aitopiahub.tasks.content_tasks.run_autonomous_kids_cycle")
+def run_autonomous_kids_cycle(account_handle: str):
+    """Bilingual (TR/EN) kids production döngüsünü tetikler."""
+    from aitopiahub.content_engine.episode_manager import EpisodeManager
+    manager = EpisodeManager(account_handle)
+    return asyncio.run(manager.run_automated_cycle())
+
+@app.task(name="aitopiahub.tasks.content_tasks.run_self_improvement")
+def run_self_improvement(account_handle: str):
+    """Zeka katmanını çalıştırarak takvimi optimize eder."""
+    from aitopiahub.content_engine.agents.feedback_agent import FeedbackAgent
+    agent = FeedbackAgent()
+    # Simüle edilmiş stats (Gerçek API entegrasyonu engagement_tasks içinde genişletilebilir)
+    return asyncio.run(agent.analyze_and_optimize({}, {}))

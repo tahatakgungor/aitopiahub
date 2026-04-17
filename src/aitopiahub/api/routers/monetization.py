@@ -3,8 +3,11 @@ from pydantic import BaseModel, Field
 from starlette.responses import RedirectResponse
 
 from aitopiahub.core.config import get_settings, AccountConfig
+from aitopiahub.core.logging import get_logger
 from aitopiahub.core.redis_client import get_redis
 from aitopiahub.monetization import AffiliateCatalog, OfferRanker, LinkTracker
+
+log = get_logger(__name__)
 
 router = APIRouter()
 
@@ -113,6 +116,38 @@ async def track_click(account_handle: str, code: str):
         await redis.hincrby(f"offer_clicks:{account_handle}", offer_id, 1)
 
     return RedirectResponse(url=target, status_code=307)
+
+
+@router.get("/monetization/postback/{account_handle}")
+async def track_postback(
+    account_handle: str,
+    code: str,
+    offer_id: str | None = None,
+    payout: float = 0.0,
+):
+    """
+    Affiliate ağlarından gelen sinyalleri (S2S) karşılayan endpoint.
+    Public'tir, dış ağlar buraya GET isteği atar.
+    Örn: /api/v1/monetization/postback/aitopiahub?code=abc12345
+    """
+    redis = get_redis()
+    # Click meta verilerini bul (kodun doğruluğu için)
+    meta = await redis.hget(f"link_meta:{account_handle}", code)
+    if not meta:
+        # Geçersiz kod veya farklı hesap
+        log.warning("invalid_postback_code", account=account_handle, code=code)
+        raise HTTPException(status_code=400, detail="Geçersiz conversion kodu")
+
+    # Signup sayacını artır
+    target_offer_id = offer_id or str(meta).split("|")[0]
+    await redis.hincrby(f"affiliate_signups:{account_handle}", target_offer_id, 1)
+
+    # İsteğe bağlı: Payout logu
+    if payout > 0:
+        await redis.hincrbyfloat(f"revenue_total:{account_handle}", target_offer_id, payout)
+
+    log.info("postback_recorded", account=account_handle, code=code, offer_id=target_offer_id)
+    return {"status": "ok", "conversions": 1}
 
 
 @router.post("/monetization/{account_handle}/events/signup")

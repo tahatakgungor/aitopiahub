@@ -6,7 +6,7 @@ Otomatik Ollama fallback.
 from __future__ import annotations
 
 import json
-from enum import StrEnum
+from enum import Enum
 
 from groq import AsyncGroq
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
@@ -18,7 +18,7 @@ from aitopiahub.core.logging import get_logger
 log = get_logger(__name__)
 
 
-class ModelTier(StrEnum):
+class ModelTier(str, Enum):
     QUALITY = "quality"   # Llama 3.3 70B — içerik üretimi
     FAST = "fast"         # Llama 3.1 8B — sınıflandırma, filtreleme
 
