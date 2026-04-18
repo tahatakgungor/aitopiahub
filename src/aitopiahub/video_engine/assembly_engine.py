@@ -144,8 +144,9 @@ class AssemblyEngine:
             else:
                 clip = ImageClip(str(scene["image_path"]))
                 clip = clip.set_duration(scene_duration).resize(height=1080)
-                zoom_speed = 0.04 + (random.random() * 0.04)
-                clip = clip.resize(lambda t: 1 + zoom_speed * t / scene_duration)
+                _zspeed = 0.04 + (random.random() * 0.04)
+                _sdur = max(scene_duration, 0.001)
+                clip = clip.resize(lambda t, zs=_zspeed, sd=_sdur: 1 + zs * t / sd)
             if i > 0:
                 clip = clip.crossfadein(0.8)
 
@@ -269,17 +270,31 @@ class AssemblyEngine:
         return CompositeAudioClip(stitched).set_duration(duration)
 
     def _apply_ducking(self, bg_music, *, speech_segments: list[tuple[float, float]], ducking_db: float = -16.0):
+        """Apply volume ducking during speech segments.
+
+        MoviePy may call make_frame with a numpy array of timestamps instead of
+        a scalar, so we must handle both cases to avoid:
+          "The truth value of an array with more than one element is ambiguous."
+        """
+        import numpy as np
         from moviepy.audio.AudioClip import AudioClip
 
         quiet_factor = 10 ** (ducking_db / 20.0)
 
-        def _frame(t: float):
-            gain = 1.0
+        def _frame(t):
+            # t can be a scalar float or a 1-D numpy array (batch rendering)
+            t_arr = np.atleast_1d(np.asarray(t, dtype=float))
+            gain = np.ones(len(t_arr), dtype=float)
             for start, end in speech_segments:
-                if start <= t <= end:
-                    gain = quiet_factor
-                    break
-            return bg_music.get_frame(t) * gain
+                mask = (t_arr >= start) & (t_arr <= end)
+                gain[mask] = quiet_factor
+            raw = bg_music.get_frame(t)
+            # raw shape is (n_samples,) for mono or (n_samples, channels) for stereo
+            raw_arr = np.atleast_2d(raw) if raw.ndim == 1 else raw
+            gain_col = gain.reshape(-1, 1)
+            result = raw_arr * gain_col
+            # Return in same shape as input
+            return result if raw.ndim > 1 else result.squeeze(axis=-1)
 
         return AudioClip(make_frame=_frame, duration=bg_music.duration, fps=44100)
 
