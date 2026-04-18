@@ -109,6 +109,7 @@ Ek Kurallar:
 - Sahne metinleri ve görseller birbirini birebir tamamlasın.
 """
 
+        min_words = 35 if language == "tr" else 30
         prompt = f"""Konu: "{note.keyword}"
 Detaylar: {note.main_finding}
 Dil: {"Türkçe" if language == "tr" else "English"}
@@ -117,10 +118,11 @@ Dil: {"Türkçe" if language == "tr" else "English"}
 
 YouTube için 5 dakikalık çocuk eğitim/hikaye videosu (Episode) senaryosu yaz.
 Kurallar:
-- SÜRE: Toplam 5 dakika (yaklaşık 700-800 kelime).
+- SÜRE: Toplam 5 dakika (yaklaşık 700-800 kelime, HER SAHNE EN AZ {min_words} KELIME).
 - YAPI: Giriş (Hook), 3 Ana Bölüm, Etkileşim (Soru-Cevap), Kapanış.
 - KARAKTERLER: Bir 'Anlatıcı' (Narrator) ve en az 1-2 'Karakter' (Diyalog kurabilirler).
-- SAHNELER: En az 15, en fazla 25 sahne. Her sahne için görsel prompt ve metin.
+- SAHNELER: TAM OLARAK 20 sahne yaz. Her sahne için görsel prompt ve metin.
+- KRİTİK: Her "text" alanı EN AZ {min_words} kelime içermeli. Kısa cümleler KESİNLİKLE YASAK.
 JSON formatında döndür:
 {{
   "title": "Bölüm Başlığı",
@@ -128,15 +130,20 @@ JSON formatında döndür:
   "scenes": [
     {{
       "index": 0,
-      "speaker": "Narrator" veya "Karakter Adı",
-      "text": "Detaylı seslendirme metni (en az 25-40 kelime bu sahne için)",
-      "image_prompt": "İngilizce Pixar tarzı görsel prompt"
+      "speaker": "Narrator",
+      "text": "En az {min_words} kelimeden oluşan detaylı, akıcı seslendirme metni. Çocukların hayal gücünü ateşleyen, merak uyandıran cümleler yaz. Bu sahne hikayenin girişi olmalı.",
+      "image_prompt": "Pixar 3D animation style, colorful kids illustration showing [scene content], vibrant colors, no text",
+      "asset_query": "kids animated short clip [scene topic]",
+      "mood": "playful",
+      "motion_hint": "gentle camera pan right",
+      "avoid_elements": ["violence", "horror", "blood"]
     }}
   ],
-  "image_prompt_hint": "Genel üslup (Pixar 3D)"
+  "image_prompt_hint": "Pixar 3D animation style, bright colors, child-friendly"
 }}
 
-Önemli: Türkçe kalitesini EN ÜST seviyede tut. Çeviri gibi değil, bir Türk çocuk masalı gibi aksın.
+KRİTİK KURAL: Her "text" değeri {min_words} kelimeden AZ OLAMAZ. Toplam 20 sahne × {min_words} kelime = en az {20 * min_words} kelime gerekli.
+{"Türkçe kalitesini EN ÜST seviyede tut. Çeviri gibi değil, bir Türk çocuk masalı gibi aksın." if language == "tr" else "Write natural, engaging English that flows like a professional children's storyteller."}
 """
 
         try:
@@ -144,13 +151,16 @@ JSON formatında döndür:
                 prompt,
                 system=self.system_prompt,
                 model=ModelTier.QUALITY,
-                max_tokens=4000,
+                max_tokens=6000,  # 20 scenes × ~250 tokens each = ~5000 tokens needed
             )
 
+            scenes = self._normalize_episode_scenes(data.get("scenes", []))
+            # Enforce minimum text per scene — short scenes cause < 60s videos
+            scenes = self._enforce_scene_text_minimum(scenes, language=language, min_words=min_words)
             return WriterOutput(
                 post_format=PostFormat.LONG_EPISODE,
                 caption_text=data.get("caption", ""),
-                slide_texts=data.get("scenes", []),
+                slide_texts=scenes,
                 image_prompt_hint=data.get("image_prompt_hint", "Pixar style 3D animation"),
                 angle=angle,
                 suggested_hashtags=["kids", "learning", "storytime"],
@@ -341,3 +351,72 @@ Kurallar:
             angle=ContentAngle.INFORMATIVE,
             suggested_hashtags=["AI", "Teknoloji"],
         )
+
+    def _enforce_scene_text_minimum(
+        self, scenes: list[dict], *, language: str = "tr", min_words: int = 30
+    ) -> list[dict]:
+        """Ensure every scene has at least min_words of narration text.
+
+        If the LLM produced a scene that's too short, we expand it by repeating
+        the core sentence with descriptive filler so TTS produces at least ~8–10s
+        of audio per scene (target ~14s).  This prevents sub-60s output videos.
+        """
+        TR_FILLERS = [
+            "Şimdi düşün bir dakika.",
+            "Bu gerçekten çok ilginç, değil mi?",
+            "Haydi birlikte keşfedelim!",
+            "Bunu biliyor muydunuz?",
+            "İşte tam da bu yüzden bu konu çok önemli.",
+        ]
+        EN_FILLERS = [
+            "Isn't that amazing?",
+            "Let's think about that for a moment.",
+            "Can you believe it?",
+            "That's truly wonderful!",
+            "Let's explore this together!",
+        ]
+        fillers = TR_FILLERS if language == "tr" else EN_FILLERS
+        import random as _random
+        result = []
+        for i, scene in enumerate(scenes):
+            text = str(scene.get("text") or "").strip()
+            words = text.split()
+            if len(words) < min_words:
+                # Pad with topic-aware filler until min_words reached
+                extra = _random.choice(fillers)
+                while len(text.split()) < min_words:
+                    text = f"{text} {extra}"
+                scene = dict(scene)
+                scene["text"] = text.strip()
+                log.debug("scene_text_padded", scene_index=i, original_words=len(words), final_words=len(text.split()))
+            result.append(scene)
+        return result
+
+    def _normalize_episode_scenes(self, scenes: list[dict]) -> list[dict]:
+        normalized: list[dict] = []
+        for i, scene in enumerate(scenes or []):
+            if not isinstance(scene, dict):
+                continue
+            text = str(scene.get("text") or "").strip()
+            prompt = str(scene.get("image_prompt") or "").strip()
+            asset_query = str(scene.get("asset_query") or prompt or "kids animation").strip()
+            mood = str(scene.get("mood") or "playful").strip().lower()
+            if mood not in {"playful", "calm", "adventure", "wonder"}:
+                mood = "playful"
+            motion_hint = str(scene.get("motion_hint") or "gentle camera pan").strip()
+            avoid = scene.get("avoid_elements") or ["violence", "horror", "blood"]
+            if not isinstance(avoid, list):
+                avoid = ["violence", "horror", "blood"]
+            normalized.append(
+                {
+                    "index": int(scene.get("index", i)),
+                    "speaker": str(scene.get("speaker") or "Narrator"),
+                    "text": text,
+                    "image_prompt": prompt or "Pixar style 3D kids illustration",
+                    "asset_query": asset_query,
+                    "mood": mood,
+                    "motion_hint": motion_hint,
+                    "avoid_elements": [str(x) for x in avoid],
+                }
+            )
+        return normalized

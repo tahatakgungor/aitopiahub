@@ -12,6 +12,7 @@ from moviepy.editor import (
     CompositeVideoClip,
     ImageClip,
     TextClip,
+    VideoFileClip,
     concatenate_videoclips,
     vfx,
 )
@@ -120,6 +121,8 @@ class AssemblyEngine:
         scene_data: list[dict],
         output_filename: str,
         bg_music_path: Path | str | None = None,
+        bg_music_tracks: list[dict] | None = None,
+        ducking_db: float = -16.0,
     ) -> Path:
         """Build 5-10 minute long-form episode."""
         if not scene_data:
@@ -129,51 +132,56 @@ class AssemblyEngine:
         log.info("starting_episode_assembly", output=output_filename, scenes=len(scene_data))
 
         clips = []
+        speech_segments: list[tuple[float, float]] = []
+        t_cursor = 0.0
         for i, scene in enumerate(scene_data):
             audio_clip = AudioFileClip(str(scene["audio_path"]))
             scene_duration = audio_clip.duration + 0.5
 
-            clip = ImageClip(str(scene["image_path"]))
-            clip = clip.set_duration(scene_duration).resize(height=1080)
-            zoom_speed = 0.04 + (random.random() * 0.04)
-            clip = clip.resize(lambda t: 1 + zoom_speed * t / scene_duration)
+            if scene.get("video_path"):
+                clip = VideoFileClip(str(scene["video_path"])).without_audio().set_duration(scene_duration)
+                clip = clip.resize(height=1080)
+            else:
+                clip = ImageClip(str(scene["image_path"]))
+                clip = clip.set_duration(scene_duration).resize(height=1080)
+                _zspeed = 0.04 + (random.random() * 0.04)
+                _sdur = max(scene_duration, 0.001)
+                clip = clip.resize(lambda t, zs=_zspeed, sd=_sdur: 1 + zs * t / sd)
             if i > 0:
                 clip = clip.crossfadein(0.8)
 
             text = scene.get("text", "")
             if text:
                 try:
-                    txt = (
-                        TextClip(
-                            text,
-                            fontsize=45,
-                            color="white",
-                            font="Arial-Bold",
-                            stroke_color="black",
-                            stroke_width=1,
-                            method="caption",
-                            size=(1600, None),
-                        )
-                        .set_duration(scene_duration)
-                        .set_position(("center", 850))
-                    )
+                    txt = self._safe_textclip(
+                        text=text,
+                        fontsize=45,
+                        color="white",
+                        stroke_color="black",
+                        stroke_width=1,
+                        size=(1600, None),
+                    ).set_duration(scene_duration).set_position(("center", 850))
                     clip = CompositeVideoClip([clip, txt])
                 except Exception as exc:
                     log.warning("episode_subtitle_failed", scene=i, error=str(exc))
 
             clip = clip.set_audio(audio_clip)
             clips.append(clip)
+            speech_segments.append((t_cursor, t_cursor + audio_clip.duration))
+            t_cursor += scene_duration
 
         final_video = concatenate_videoclips(clips, method="compose", padding=-0.5)
 
-        if bg_music_path and os.path.exists(bg_music_path):
-            bg_music = AudioFileClip(str(bg_music_path)).volumex(0.1)
-            if bg_music.duration < final_video.duration:
-                bg_music = bg_music.fx(vfx.loop, duration=final_video.duration)
-            bg_music = bg_music.set_duration(final_video.duration)
+        music_bed = self._build_music_bed(
+            duration=final_video.duration,
+            bg_music_path=bg_music_path,
+            bg_music_tracks=bg_music_tracks,
+        )
+        if music_bed is not None:
+            ducked = self._apply_ducking(music_bed, speech_segments=speech_segments, ducking_db=ducking_db)
             from moviepy.audio.AudioClip import CompositeAudioClip
 
-            mixed = CompositeAudioClip([final_video.audio, bg_music])
+            mixed = CompositeAudioClip([final_video.audio, ducked])
             final_video = final_video.set_audio(mixed)
 
         log.info("rendering_long_episode", path=str(output_path))
@@ -187,6 +195,125 @@ class AssemblyEngine:
         )
         final_video.close()
         return output_path
+
+    def _safe_textclip(
+        self,
+        *,
+        text: str,
+        fontsize: int,
+        color: str,
+        stroke_color: str,
+        stroke_width: int,
+        size: tuple[int, int | None],
+    ) -> TextClip:
+        for font in ("DejaVu-Sans", "Liberation-Sans", "Arial-Bold", None):
+            try:
+                if font:
+                    return TextClip(
+                        text,
+                        fontsize=fontsize,
+                        color=color,
+                        font=font,
+                        stroke_color=stroke_color,
+                        stroke_width=stroke_width,
+                        method="caption",
+                        size=size,
+                    )
+                return TextClip(
+                    text,
+                    fontsize=fontsize,
+                    color=color,
+                    stroke_color=stroke_color,
+                    stroke_width=stroke_width,
+                    method="caption",
+                    size=size,
+                )
+            except Exception:
+                continue
+        raise RuntimeError("subtitle_textclip_failed")
+
+    def _build_music_bed(
+        self,
+        *,
+        duration: float,
+        bg_music_path: Path | str | None,
+        bg_music_tracks: list[dict] | None,
+    ):
+        track_clips: list[AudioFileClip] = []
+        if bg_music_tracks:
+            for item in bg_music_tracks:
+                path = str(item.get("path") or "")
+                if not path or not os.path.exists(path):
+                    continue
+                clip = AudioFileClip(path).volumex(0.16)
+                if clip.duration < duration:
+                    clip = clip.fx(vfx.loop, duration=duration)
+                track_clips.append(clip)
+        elif bg_music_path and os.path.exists(bg_music_path):
+            clip = AudioFileClip(str(bg_music_path)).volumex(0.16)
+            if clip.duration < duration:
+                clip = clip.fx(vfx.loop, duration=duration)
+            track_clips.append(clip)
+        if not track_clips:
+            return None
+        if len(track_clips) == 1:
+            return track_clips[0].set_duration(duration)
+
+        # Max 2 segment changes -> max 3 tracks.
+        limited = track_clips[:3]
+        segment = duration / len(limited)
+        stitched = []
+        for idx, clip in enumerate(limited):
+            stitched.append(clip.subclip(0, min(segment, clip.duration)).set_start(idx * segment))
+        from moviepy.audio.AudioClip import CompositeAudioClip
+
+        return CompositeAudioClip(stitched).set_duration(duration)
+
+    def _apply_ducking(self, bg_music, *, speech_segments: list[tuple[float, float]], ducking_db: float = -16.0):
+        """Apply volume ducking during speech segments.
+
+        MoviePy may call make_frame with a numpy array of timestamps instead of
+        a scalar, so we must handle both cases to avoid:
+          "The truth value of an array with more than one element is ambiguous."
+        """
+        import numpy as np
+        from moviepy.audio.AudioClip import AudioClip
+
+        quiet_factor = 10 ** (ducking_db / 20.0)
+
+        def _frame(t):
+            # t may be a Python scalar, a 0-d numpy array, or a 1-D numpy array
+            # of timestamps (batch rendering).  Handle all three cases so we never
+            # hit "truth value of array is ambiguous" or "cannot squeeze axis".
+            import numpy as _np  # local import avoids shadowing module-level np
+
+            t_is_scalar = _np.ndim(t) == 0  # True for float / 0-d array
+
+            raw = bg_music.get_frame(t)
+
+            if t_is_scalar:
+                # Scalar path: raw is (channels,) for stereo or () for mono.
+                # Compute a single gain value with plain Python logic.
+                t_val = float(t)
+                gain = quiet_factor if any(s <= t_val <= e for s, e in speech_segments) else 1.0
+                return _np.asarray(raw) * gain
+            else:
+                # Batch path: t is 1-D array of shape (n,).
+                # raw is (n,) for mono  or  (n, channels) for stereo.
+                t_arr = _np.asarray(t, dtype=float)
+                gain = _np.ones(len(t_arr), dtype=float)
+                for start, end in speech_segments:
+                    mask = (t_arr >= start) & (t_arr <= end)
+                    gain[mask] = quiet_factor
+                raw_arr = _np.asarray(raw)
+                if raw_arr.ndim == 1:
+                    # mono
+                    return raw_arr * gain
+                else:
+                    # stereo: shape (n, channels) → broadcast gain along axis 0
+                    return raw_arr * gain[:, _np.newaxis]
+
+        return AudioClip(make_frame=_frame, duration=bg_music.duration, fps=44100)
 
     async def create_teaser(
         self,

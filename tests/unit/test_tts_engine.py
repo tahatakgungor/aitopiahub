@@ -28,6 +28,7 @@ async def test_tts_engine_falls_back_to_piper(monkeypatch, tmp_path: Path) -> No
 
     monkeypatch.setattr(engine, "_generate_edge", _fail_edge)
     monkeypatch.setattr(engine, "_generate_piper", _ok_piper)
+    monkeypatch.setattr(engine, "_post_process_audio", lambda input_path, output_path: input_path)
 
     output = await engine.generate("Merhaba", lang="tr", character="narrator")
     assert output.suffix == ".wav"

@@ -7,6 +7,7 @@ Sıfır maliyet, tutarlı marka kimliği.
 from __future__ import annotations
 
 import io
+import random
 import textwrap
 from enum import Enum
 from pathlib import Path
@@ -37,6 +38,7 @@ COLORS = {
 INSTAGRAM_SIZES = {
     "portrait": (1080, 1350),
     "square": (1080, 1080),
+    "story": (1080, 1920),   # 9:16 vertical — YouTube Shorts / Instagram Stories
 }
 
 
@@ -237,6 +239,65 @@ class TemplateRenderer:
         # Hesap adı
         font_handle = _load_font("Inter-Bold.ttf", 44)
         draw.text((50, H - 120), "@aitopiahub_news", font=font_handle, fill=COLORS["accent_blue"])
+
+        return self._to_bytes(img)
+
+    def render_kids_scene(
+        self,
+        title: str,
+        subtitle: str = "",
+        mood: str = "playful",
+    ) -> bytes:
+        """Kid-friendly fallback scene visual (non-news style)."""
+        img = self._base_image("story")
+        draw = ImageDraw.Draw(img)
+        w, h = INSTAGRAM_SIZES["story"]
+
+        base_map = {
+            "playful": ((255, 198, 109), (120, 193, 255)),
+            "calm": ((180, 229, 255), (135, 206, 250)),
+            "adventure": ((255, 224, 130), (255, 183, 77)),
+            "wonder": ((201, 169, 255), (140, 190, 255)),
+        }
+        c1, c2 = base_map.get(mood, base_map["playful"])
+        for y in range(h):
+            ratio = y / max(1, h - 1)
+            r = int(c1[0] * (1 - ratio) + c2[0] * ratio)
+            g = int(c1[1] * (1 - ratio) + c2[1] * ratio)
+            b = int(c1[2] * (1 - ratio) + c2[2] * ratio)
+            draw.line([(0, y), (w, y)], fill=(r, g, b))
+
+        rng = random.Random(f"{title}:{subtitle}:{mood}")
+        for _ in range(26):
+            radius = rng.randint(12, 60)
+            x = rng.randint(0, w)
+            y = rng.randint(0, h)
+            color = (
+                rng.randint(120, 255),
+                rng.randint(120, 255),
+                rng.randint(120, 255),
+                rng.randint(40, 110),
+            )
+            draw.ellipse([x - radius, y - radius, x + radius, y + radius], fill=color)
+
+        font_title = _load_font("Inter-Bold.ttf", 74)
+        font_sub = _load_font("Inter-Regular.ttf", 46)
+        wrapped_title = textwrap.wrap(title, width=18)[:4]
+        y = 240
+        for line in wrapped_title:
+            bbox = draw.textbbox((0, 0), line, font=font_title)
+            x = (w - (bbox[2] - bbox[0])) // 2
+            draw.text((x, y), line, font=font_title, fill=(255, 255, 255))
+            y += 92
+
+        if subtitle:
+            wrapped_sub = textwrap.wrap(subtitle, width=24)[:3]
+            y += 20
+            for line in wrapped_sub:
+                bbox = draw.textbbox((0, 0), line, font=font_sub)
+                x = (w - (bbox[2] - bbox[0])) // 2
+                draw.text((x, y), line, font=font_sub, fill=(245, 245, 255))
+                y += 58
 
         return self._to_bytes(img)
 

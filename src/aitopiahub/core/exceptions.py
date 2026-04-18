@@ -36,3 +36,7 @@ class RateLimitError(AitopiahubError):
 
 class LLMError(AitopiahubError):
     """LLM çağrısı başarısız."""
+
+
+class QualityGateError(AitopiahubError):
+    """Publish öncesi kalite kapısı içerik akışını durdurdu."""

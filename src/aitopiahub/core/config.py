@@ -113,11 +113,40 @@ class Settings(BaseSettings):
     youtube_refresh_token: str = ""
 
     # TTS runtime routing
-    tts_provider_primary: str = "edge"
+    tts_provider_premium: str = "elevenlabs"
+    tts_provider_primary: str = "xtts_local"
+    tts_provider_secondary: str = "edge"
     tts_provider_fallback: str = "piper"
+    xtts_model_path: str = ""
+    xtts_device: str = "cpu"
+    xtts_binary: str = "tts"
     piper_binary: str = "piper"
     piper_model_tr_path: str = ""
     piper_model_en_path: str = ""
+    elevenlabs_api_key: str = ""
+    elevenlabs_voice_tr: str = ""
+    elevenlabs_voice_en: str = ""
+    elevenlabs_model_id: str = "eleven_multilingual_v2"
+    elevenlabs_cost_per_1k_chars: float = 0.30
+
+    # Visual runtime routing
+    visual_provider_primary: str = "pexels"
+    visual_provider_secondary: str = "pixabay"
+    visual_provider_ai: str = "pollinations"
+    pexels_api_key: str = ""
+    pixabay_api_key: str = ""
+
+    # Music + quality gate
+    music_pool_manifest: str = "assets/music/kids_pool/music_manifest.json"
+    quality_gate_strict: bool = True
+    quality_min_audio: float = 0.45   # Piper TTS produces acceptable audio
+    quality_min_visual: float = 0.35  # Pollinations AI images are scene-specific
+    quality_min_music: float = 0.55
+    quality_min_technical: float = 0.70
+
+    # Optional paid quality mode
+    allow_premium_models: bool = False
+    max_cost_per_video_usd: float = 5.0
 
     # Feature flags
     enable_shorts_pipeline: bool = False
