@@ -88,7 +88,20 @@ class LLMClient:
             )
             return content
         except Exception as e:
-            log.warning("groq_error_falling_back_to_ollama", error=str(e))
+            err_str = str(e)
+            # If 70B daily token limit exhausted, retry immediately with 8B
+            # (8B has 6M TPD vs 100K TPD for 70B — much more headroom).
+            if "tokens per day" in err_str and groq_model == GROQ_MODELS[ModelTier.QUALITY]:
+                log.warning("groq_70b_daily_limit_falling_back_to_8b", error=err_str[:120])
+                kwargs["model"] = GROQ_MODELS[ModelTier.FAST]
+                try:
+                    resp = await self._groq.chat.completions.create(**kwargs)
+                    content = resp.choices[0].message.content or ""
+                    log.info("groq_8b_fallback_success", prompt_len=len(prompt))
+                    return content
+                except Exception as e2:
+                    log.warning("groq_8b_fallback_failed", error=str(e2)[:120])
+            log.warning("groq_error_falling_back_to_ollama", error=err_str[:200])
             return await self._ollama_complete(prompt, system, max_tokens, temperature)
 
     async def _ollama_complete(

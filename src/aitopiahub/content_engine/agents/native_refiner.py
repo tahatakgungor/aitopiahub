@@ -35,10 +35,12 @@ Kurallar:
         prompt = f"""Lütfen bu metni 'Kusursuz ve Doğal Türkçe' ile çocuklara anlatılıyormuş gibi yeniden yaz:\n\n{text}"""
 
         try:
+            # Use FAST (8B) tier for per-scene refinement to preserve the 70B
+            # daily token budget for the main script generation call.
             refined = await self.llm.complete(
                 prompt,
                 system=self.SYSTEM_PROMPT,
-                model=ModelTier.QUALITY,
+                model=ModelTier.FAST,
                 max_tokens=2000,
             )
             log.info("native_refinement_success", original_len=len(text), refined_len=len(refined))
