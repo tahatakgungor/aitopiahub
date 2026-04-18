@@ -38,6 +38,7 @@ COLORS = {
 INSTAGRAM_SIZES = {
     "portrait": (1080, 1350),
     "square": (1080, 1080),
+    "story": (1080, 1920),   # 9:16 vertical — YouTube Shorts / Instagram Stories
 }
 
 

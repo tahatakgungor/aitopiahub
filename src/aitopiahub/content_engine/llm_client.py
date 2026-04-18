@@ -28,7 +28,7 @@ class ModelTier(str, Enum):
 
 
 GROQ_MODELS = {
-    ModelTier.QUALITY: "llama-3.1-8b-instant", # Temporarily swapped from 70b to bypass rate limits
+    ModelTier.QUALITY: "llama-3.3-70b-versatile",  # 70B for high-quality scene generation
     ModelTier.FAST: "llama-3.1-8b-instant",
 }
 
