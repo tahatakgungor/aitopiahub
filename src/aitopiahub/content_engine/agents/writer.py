@@ -126,15 +126,19 @@ JSON formatında döndür:
   "title": "Bölüm Başlığı",
   "caption": "Video açıklaması",
   "scenes": [
-    {{
-      "index": 0,
-      "speaker": "Narrator" veya "Karakter Adı",
-      "text": "Detaylı seslendirme metni (en az 25-40 kelime bu sahne için)",
-      "image_prompt": "İngilizce Pixar tarzı görsel prompt"
-    }}
-  ],
-  "image_prompt_hint": "Genel üslup (Pixar 3D)"
-}}
+	    {{
+	      "index": 0,
+	      "speaker": "Narrator" veya "Karakter Adı",
+	      "text": "Detaylı seslendirme metni (en az 25-40 kelime bu sahne için)",
+	      "image_prompt": "İngilizce Pixar tarzı görsel prompt",
+	      "asset_query": "Stok video/gif bulmak için kısa İngilizce sorgu",
+	      "mood": "playful|calm|adventure|wonder",
+	      "motion_hint": "Camera pan, zoom in, running, flying gibi hareket ipucu",
+	      "avoid_elements": ["violence", "horror", "blood"]
+	    }}
+	  ],
+	  "image_prompt_hint": "Genel üslup (Pixar 3D)"
+	}}
 
 Önemli: Türkçe kalitesini EN ÜST seviyede tut. Çeviri gibi değil, bir Türk çocuk masalı gibi aksın.
 """
@@ -150,7 +154,7 @@ JSON formatında döndür:
             return WriterOutput(
                 post_format=PostFormat.LONG_EPISODE,
                 caption_text=data.get("caption", ""),
-                slide_texts=data.get("scenes", []),
+                slide_texts=self._normalize_episode_scenes(data.get("scenes", [])),
                 image_prompt_hint=data.get("image_prompt_hint", "Pixar style 3D animation"),
                 angle=angle,
                 suggested_hashtags=["kids", "learning", "storytime"],
@@ -341,3 +345,32 @@ Kurallar:
             angle=ContentAngle.INFORMATIVE,
             suggested_hashtags=["AI", "Teknoloji"],
         )
+
+    def _normalize_episode_scenes(self, scenes: list[dict]) -> list[dict]:
+        normalized: list[dict] = []
+        for i, scene in enumerate(scenes or []):
+            if not isinstance(scene, dict):
+                continue
+            text = str(scene.get("text") or "").strip()
+            prompt = str(scene.get("image_prompt") or "").strip()
+            asset_query = str(scene.get("asset_query") or prompt or "kids animation").strip()
+            mood = str(scene.get("mood") or "playful").strip().lower()
+            if mood not in {"playful", "calm", "adventure", "wonder"}:
+                mood = "playful"
+            motion_hint = str(scene.get("motion_hint") or "gentle camera pan").strip()
+            avoid = scene.get("avoid_elements") or ["violence", "horror", "blood"]
+            if not isinstance(avoid, list):
+                avoid = ["violence", "horror", "blood"]
+            normalized.append(
+                {
+                    "index": int(scene.get("index", i)),
+                    "speaker": str(scene.get("speaker") or "Narrator"),
+                    "text": text,
+                    "image_prompt": prompt or "Pixar style 3D kids illustration",
+                    "asset_query": asset_query,
+                    "mood": mood,
+                    "motion_hint": motion_hint,
+                    "avoid_elements": [str(x) for x in avoid],
+                }
+            )
+        return normalized

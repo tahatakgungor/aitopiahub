@@ -1,0 +1,11 @@
+{
+  "tracks": [
+    {
+      "id": "happy_kids_main",
+      "path": "assets/music/happy_kids.mp3",
+      "mood": "playful",
+      "energy": 0.72,
+      "safe_tags": ["kids", "safe", "uplifting"]
+    }
+  ]
+}

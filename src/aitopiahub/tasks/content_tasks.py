@@ -428,6 +428,7 @@ async def _run_kids_language_cycle_async(
             "lang": lang,
             "content_mode": mode,
             "error": str(exc),
+            "quality_failure_reason": (str(exc).split("quality_gate_failed:", 1)[1] if "quality_gate_failed:" in str(exc) else None),
             "failures": failures,
             "task_retries": task_ctx.request.retries,
             "at": datetime.now(timezone.utc).isoformat(),

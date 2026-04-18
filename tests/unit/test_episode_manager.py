@@ -46,6 +46,8 @@ async def test_episode_manager_run_daily_flow_returns_url(monkeypatch, tmp_path:
             return p, "http://localhost/images/scene.jpg"
 
     class _FakeTts:
+        last_provider_used = "xtts_local"
+
         async def generate(self, *args, **kwargs):
             p = tmp_path / "scene.wav"
             p.write_bytes(b"audio")
@@ -70,6 +72,22 @@ async def test_episode_manager_run_daily_flow_returns_url(monkeypatch, tmp_path:
         async def publish_reel(self, *args, **kwargs):
             return _FakeIgResult(media_id="ig123")
 
+    class _FakeQuality:
+        def evaluate(self, *args, **kwargs):
+            class _R:
+                passed = True
+                failed_layer = None
+                scores = {"audio": 0.9, "visual": 0.9, "music": 0.9, "technical": 0.9}
+
+            return _R()
+
+        def ensure(self, *args, **kwargs):
+            return None
+
+    class _FakeMusicSelector:
+        def choose_tracks(self, *args, **kwargs):
+            return []
+
     class _FakeRedis:
         async def hgetall(self, *args, **kwargs):
             return {}
@@ -88,6 +106,8 @@ async def test_episode_manager_run_daily_flow_returns_url(monkeypatch, tmp_path:
     manager.assembly = _FakeAssembly()
     manager.yt_client = _FakeYt()
     manager.ig_client = _FakeIg()
+    manager.quality_gate = _FakeQuality()
+    manager.music_selector = _FakeMusicSelector()
 
     result = await manager.run_daily_flow(lang="tr")
     assert result == "https://youtube.com/watch?v=vid123"
