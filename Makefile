@@ -1,4 +1,4 @@
-.PHONY: help up down logs install migrate seed test test-post lint
+.PHONY: help up down logs install migrate seed test test-post lint server-status
 
 help:
 	@echo "Aitopiahub — Komutlar"
@@ -12,6 +12,7 @@ help:
 	@echo "  make test         pytest çalıştır"
 	@echo "  make test-post    Dry-run post testi"
 	@echo "  make lint         Ruff linting"
+	@echo "  make server-status  Sunucudan anlık durum al (VPS ayarları gerekir)"
 
 up:
 	cd docker && docker-compose up -d
@@ -43,6 +44,9 @@ test-post:
 
 lint:
 	ruff check src/ scripts/ --fix
+
+server-status:
+	@bash -lc 'source .env >/dev/null 2>&1; ssh $$VPS_USER@$$VPS_HOST "bash $$VPS_REMOTE_PATH/scripts/server_status.sh"'
 
 # Yeni hesap ekleme yardımcısı
 add-account:

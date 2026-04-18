@@ -18,6 +18,8 @@ dist/
 data/
 *.log
 cookies.pkl
+models/**/*.onnx
+models/**/*.onnx.json
 
 # Docker volumes
 postgres_data/

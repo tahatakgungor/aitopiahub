@@ -1,0 +1,36 @@
+stories:
+  - id: red_riding_hood
+    title: Kırmızı Başlıklı Kız
+    age_band: "4-8"
+    theme: dikkat ve güvenlik
+    characters: [Kırmızı Başlıklı Kız, Anne, Büyükanne, Kurt, Oduncu]
+    blocked_elements: [aşırı korku, kan, şiddet sahnesi]
+    moral: Tanımadığın kişilerle kişisel bilgi paylaşma ve güvenli yolları seç.
+  - id: rapunzel
+    title: Rapunzel
+    age_band: "4-8"
+    theme: umut ve cesaret
+    characters: [Rapunzel, Prens, Büyücü Kadın]
+    blocked_elements: [karanlık tehdit dili, fiziksel şiddet detayı]
+    moral: Sabır, dostluk ve doğru zamanda yardım istemek çok değerlidir.
+  - id: cinderella
+    title: Külkedisi
+    age_band: "4-8"
+    theme: nezaket ve özsaygı
+    characters: [Külkedisi, Peri Anne, Prens]
+    blocked_elements: [zorbalık detayı, aşağılama dili]
+    moral: İyilik ve çalışkanlık sonunda karşılığını bulur.
+  - id: snow_white
+    title: Pamuk Prenses
+    age_band: "5-9"
+    theme: dostluk ve dayanışma
+    characters: [Pamuk Prenses, Yedi Cüceler, Kötü Kraliçe]
+    blocked_elements: [zehir ve ölüm detayı, korkutucu sahne]
+    moral: Güvenilir arkadaşlar ve dayanışma zorlukları aşar.
+  - id: hansel_gretel
+    title: Hansel ve Gretel
+    age_band: "5-9"
+    theme: problem çözme
+    characters: [Hansel, Gretel, Cadı]
+    blocked_elements: [korku yoğunluğu, tehdit dili]
+    moral: Panik yerine plan yapmak ve birlikte hareket etmek güç verir.

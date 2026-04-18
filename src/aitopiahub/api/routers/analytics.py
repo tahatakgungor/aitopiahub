@@ -96,6 +96,21 @@ async def get_revenue(account_handle: str, x_api_key: str = Header(...)):
     }
 
 
+@router.get("/analytics/{account_handle}/candidates")
+async def get_content_candidates(account_handle: str, x_api_key: str = Header(...)):
+    """Internal aday içerik listesi (mode etiketli)."""
+    _auth(x_api_key)
+    redis = get_redis()
+    raw = await redis.get(f"content_candidates:{account_handle}")
+    if not raw:
+        return {"account": account_handle, "items": []}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        payload = {"items": []}
+    return {"account": account_handle, **payload}
+
+
 async def _load_published(redis, account_handle: str) -> list[dict]:
     result = []
     keys = await redis.keys("published:*")

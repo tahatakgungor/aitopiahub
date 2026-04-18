@@ -85,6 +85,15 @@ class Settings(BaseSettings):
     app_env: str = "development"
     secret_key: str = "changeme"
     log_level: str = "INFO"
+    account_handle: str = "aitopiahub_kids"
+    kids_run_slots: str = "10:00,19:00"
+    kids_retry_budget: int = 2
+    automation_strict_free: bool = True
+    hybrid_daily_mix: str = "1_fairy_1_demand"
+    fairy_style: str = "modern_educational"
+    fairy_library_path: str = "./configs/fairy_tales.yaml"
+    slot1_mode: str = "fairy_tale"
+    slot2_mode: str = "demand_driven"
 
     # Database
     database_url: str = "postgresql+asyncpg://aitopiahub:aitopiahub@localhost:5432/aitopiahub"
@@ -102,6 +111,16 @@ class Settings(BaseSettings):
     youtube_client_id: str = ""
     youtube_client_secret: str = ""
     youtube_refresh_token: str = ""
+
+    # TTS runtime routing
+    tts_provider_primary: str = "edge"
+    tts_provider_fallback: str = "piper"
+    piper_binary: str = "piper"
+    piper_model_tr_path: str = ""
+    piper_model_en_path: str = ""
+
+    # Feature flags
+    enable_shorts_pipeline: bool = False
 
     # Instagram
     instagram_app_id: str = ""

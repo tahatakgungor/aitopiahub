@@ -1,0 +1,48 @@
+# Aitopiahub Kids — Long-form bilingual kids channel
+niche: kids_education
+language_primary: tr
+language_secondary: en
+timezone: "Europe/Istanbul"
+
+scheduling:
+  default_posts_per_day: 2
+  posting_window_start: "09:00"
+  posting_window_end: "21:00"
+  peak_hours: [10, 19]
+  min_gap_minutes: 240
+  strict_peak_hours: true
+  bootstrap_hours: 24
+  bootstrap_posts_per_day: 2
+
+content_engine:
+  min_quality_score: 74
+  min_publish_quality_score: 76
+  ab_test_ratio: 0.2
+  duplicate_similarity_threshold: 0.85
+
+llm:
+  system_prompt_variant: kids_storyteller
+
+monetization:
+  enabled: false
+
+image:
+  style_preset: kids_pixar
+  generate_probability: 1.0
+
+topics:
+  seed_keywords:
+    - "uzay"
+    - "dinozor"
+    - "okyanus"
+    - "hayvanlar"
+    - "geri dönüşüm"
+    - "space"
+    - "dinosaurs"
+    - "ocean animals"
+    - "science for kids"
+  blocked_keywords:
+    - "şiddet"
+    - "korku"
+    - "siyaset"
+    - "adult"

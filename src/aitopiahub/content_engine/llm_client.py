@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 from enum import Enum
 
-from groq import AsyncGroq
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from aitopiahub.core.config import get_settings
@@ -17,6 +16,11 @@ from aitopiahub.core.logging import get_logger
 
 log = get_logger(__name__)
 
+try:
+    from groq import AsyncGroq
+except Exception:  # pragma: no cover - optional dependency in some environments
+    AsyncGroq = None  # type: ignore[assignment]
+
 
 class ModelTier(str, Enum):
     QUALITY = "quality"   # Llama 3.3 70B — içerik üretimi
@@ -24,7 +28,7 @@ class ModelTier(str, Enum):
 
 
 GROQ_MODELS = {
-    ModelTier.QUALITY: "llama-3.3-70b-versatile",
+    ModelTier.QUALITY: "llama-3.1-8b-instant", # Temporarily swapped from 70b to bypass rate limits
     ModelTier.FAST: "llama-3.1-8b-instant",
 }
 
@@ -34,7 +38,7 @@ class LLMClient:
 
     def __init__(self):
         settings = get_settings()
-        self._groq = AsyncGroq(api_key=settings.groq_api_key)
+        self._groq = AsyncGroq(api_key=settings.groq_api_key) if AsyncGroq else None
         self._ollama_base = settings.ollama_base_url
 
     @retry(
@@ -68,6 +72,10 @@ class LLMClient:
         }
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
+
+        if self._groq is None:
+            log.warning("groq_client_unavailable_falling_back_to_ollama")
+            return await self._ollama_complete(prompt, system, max_tokens, temperature)
 
         try:
             resp = await self._groq.chat.completions.create(**kwargs)

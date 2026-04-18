@@ -1,6 +1,4 @@
-"""
-Engagement toplama ve öğrenme döngüsü task'ları.
-"""
+"""Engagement collection + feedback learning loop tasks."""
 
 from __future__ import annotations
 
@@ -9,10 +7,11 @@ import json
 from collections import defaultdict
 from datetime import datetime
 
-from aitopiahub.tasks.celery_app import app
 from aitopiahub.core.logging import get_logger
 from aitopiahub.core.redis_client import get_redis
 from aitopiahub.publisher.instagram_client import InstagramClient
+from aitopiahub.publisher.youtube_client import YouTubeClient
+from aitopiahub.tasks.celery_app import app
 
 log = get_logger(__name__)
 
@@ -25,67 +24,124 @@ def collect_metrics(account_handle: str) -> dict:
 async def _collect_metrics_async(account_handle: str) -> dict:
     redis = get_redis()
     instagram = InstagramClient()
+    youtube = YouTubeClient(enabled=True)
 
-    # Son 7 günlük yayınlanan post'ları al
-    published_keys = await redis.keys(f"published:*")
     collected = 0
 
-    for key in published_keys[:50]:  # Max 50 post/döngü
+    # Legacy Instagram keys from publish_tasks
+    for key in (await redis.keys("published:*"))[:50]:
         try:
-            data_str = await redis.get(key)
-            if not data_str:
+            data = await _json_get(redis, key)
+            if not data or data.get("account") != account_handle:
                 continue
-            data = json.loads(data_str)
-            if data.get("account") != account_handle:
+            media_id = str(data.get("media_id") or "")
+            if not media_id:
                 continue
 
-            media_id = data["media_id"]
             insights = await instagram.get_media_insights(media_id)
+            parsed = _parse_instagram_insights(insights)
+            if not parsed:
+                continue
 
-            if insights and "data" in insights:
-                metrics = {}
-                for item in insights["data"]:
-                    metrics[item["name"]] = item["values"][-1]["value"] if item.get("values") else 0
+            payload = {
+                "metric_id": media_id,
+                "platform": "instagram",
+                "account": account_handle,
+                "format": data.get("format", "unknown"),
+                "content_mode": data.get("content_mode", "demand_driven"),
+                "story_id": data.get("story_id"),
+                **parsed,
+                "weighted_score": _weighted_score(
+                    likes=parsed["likes"],
+                    comments=parsed["comments"],
+                    saves=parsed["saves"],
+                    shares=parsed["shares"],
+                    impressions=parsed["impressions"],
+                ),
+            }
+            await redis.setex(f"metrics:instagram:{media_id}", 30 * 86400, json.dumps(payload))
+            collected += 1
+        except Exception as exc:
+            log.warning("metrics_collect_error", key=key, error=str(exc))
 
-                impressions = metrics.get("impressions", 0)
-                likes = metrics.get("likes", 0)
-                comments = metrics.get("comments", 0)
-                saves = metrics.get("saved", 0)
-                shares = metrics.get("shares", 0)
-                reach = metrics.get("reach", 0)
+    # New Instagram episode records
+    for key in (await redis.keys("published_instagram:*") )[:50]:
+        try:
+            data = await _json_get(redis, key)
+            if not data or data.get("account") != account_handle:
+                continue
+            media_id = str(data.get("media_id") or "")
+            if not media_id:
+                continue
 
-                engagement_rate = (
-                    (likes + comments + saves + shares) / impressions
-                    if impressions > 0
-                    else 0
-                )
+            insights = await instagram.get_media_insights(media_id)
+            parsed = _parse_instagram_insights(insights)
+            if not parsed:
+                continue
 
-                await redis.setex(
-                    f"metrics:{media_id}",
-                    30 * 86400,
-                    json.dumps({
-                        "media_id": media_id,
-                        "account": account_handle,
-                        "format": data.get("format"),
-                        "impressions": impressions,
-                        "reach": reach,
-                        "likes": likes,
-                        "comments": comments,
-                        "saves": saves,
-                        "shares": shares,
-                        "engagement_rate": engagement_rate,
-                        "weighted_score": _weighted_score(
-                            likes=likes,
-                            comments=comments,
-                            saves=saves,
-                            shares=shares,
-                            impressions=impressions,
-                        ),
-                    }),
-                )
-                collected += 1
-        except Exception as e:
-            log.warning("metrics_collect_error", key=key, error=str(e))
+            payload = {
+                "metric_id": media_id,
+                "platform": "instagram",
+                "account": account_handle,
+                "format": "reel",
+                "content_mode": data.get("content_mode", "demand_driven"),
+                "story_id": data.get("story_id"),
+                **parsed,
+                "weighted_score": _weighted_score(
+                    likes=parsed["likes"],
+                    comments=parsed["comments"],
+                    saves=parsed["saves"],
+                    shares=parsed["shares"],
+                    impressions=parsed["impressions"],
+                ),
+            }
+            await redis.setex(f"metrics:instagram:{media_id}", 30 * 86400, json.dumps(payload))
+            collected += 1
+        except Exception as exc:
+            log.warning("metrics_collect_error", key=key, error=str(exc))
+
+    # YouTube records (long form)
+    for key in (await redis.keys("published_youtube:*"))[:50]:
+        try:
+            data = await _json_get(redis, key)
+            if not data or data.get("account") != account_handle:
+                continue
+            video_id = str(data.get("video_id") or "")
+            if not video_id:
+                continue
+
+            insights = await youtube.get_video_insights(video_id)
+            if not insights:
+                continue
+
+            views = int(insights.get("views", 0))
+            likes = int(insights.get("likes", 0))
+            comments = int(insights.get("comments", 0))
+            duration = str(insights.get("duration") or "")
+
+            ctr_proxy = (likes + comments) / views if views > 0 else 0.0
+            retention_proxy = min(max((likes * 1.4 + comments * 2.0) / max(views, 1), 0.0), 1.0)
+
+            payload = {
+                "metric_id": video_id,
+                "platform": "youtube",
+                "account": account_handle,
+                "format": "long_episode",
+                "content_mode": data.get("content_mode", "demand_driven"),
+                "story_id": data.get("story_id"),
+                "views": views,
+                "likes": likes,
+                "comments": comments,
+                "duration": duration,
+                "ctr_proxy": ctr_proxy,
+                "retention_proxy": retention_proxy,
+                "completion_proxy": retention_proxy,
+                "weighted_score": (likes + comments * 2.0) / max(views, 1),
+            }
+            await redis.setex(f"metrics:youtube:{video_id}", 30 * 86400, json.dumps(payload))
+            collected += 1
+        except Exception as exc:
+            log.warning("youtube_metrics_collect_error", key=key, error=str(exc))
 
     log.info("metrics_collected", account=account_handle, count=collected)
     return {"collected": collected}
@@ -99,56 +155,75 @@ def run_feedback_loop(account_handle: str) -> dict:
 async def _feedback_loop_async(account_handle: str) -> dict:
     redis = get_redis()
 
-    # Tüm metrikleri topla ve analiz et
     metric_keys = await redis.keys("metrics:*")
     metrics_list = []
 
     for key in metric_keys:
         data_str = await redis.get(key)
-        if data_str:
-            try:
-                data = json.loads(data_str)
-                if data.get("account") == account_handle:
-                    metrics_list.append(data)
-            except json.JSONDecodeError:
-                pass
+        if not data_str:
+            continue
+        try:
+            data = json.loads(data_str)
+        except json.JSONDecodeError:
+            continue
+        if data.get("account") == account_handle:
+            metrics_list.append(data)
 
     if len(metrics_list) < 3:
         log.info("feedback_loop_insufficient_data", account=account_handle)
         return {"updated": False}
 
-    # Format analizi
     format_stats: dict[str, list[float]] = {}
+    platform_stats: dict[str, list[float]] = defaultdict(list)
+    mode_stats: dict[str, list[float]] = defaultdict(list)
     post_type_stats: dict[str, list[float]] = {"affiliate": [], "organic": []}
     hashtag_scores: dict[str, list[float]] = defaultdict(list)
     hook_scores: dict[str, list[float]] = defaultdict(list)
     hour_scores: dict[int, list[float]] = defaultdict(list)
+    topic_scores: dict[str, list[float]] = defaultdict(list)
+    scene_scores: dict[int, list[float]] = defaultdict(list)
+    story_scores: dict[str, list[float]] = defaultdict(list)
 
     published_map = await _load_published_meta(redis, account_handle)
 
     for m in metrics_list:
         fmt = m.get("format", "unknown")
-        er = m.get("weighted_score", m.get("engagement_rate", 0))
-        if fmt not in format_stats:
-            format_stats[fmt] = []
-        format_stats[fmt].append(er)
+        er = float(m.get("weighted_score", m.get("engagement_rate", 0.0)) or 0.0)
+        format_stats.setdefault(fmt, []).append(er)
+        platform_stats[str(m.get("platform", "unknown"))].append(er)
+        mode_stats[str(m.get("content_mode", "demand_driven"))].append(er)
 
-        meta = published_map.get(m.get("media_id", ""))
+        metric_id = str(m.get("metric_id") or m.get("media_id") or m.get("video_id") or "")
+        meta = published_map.get(metric_id)
         if not meta:
             continue
+
         if meta.get("is_affiliate"):
             post_type_stats["affiliate"].append(er)
         else:
             post_type_stats["organic"].append(er)
 
-        hashtags = meta.get("hashtags", []) or []
-        for tag in hashtags:
+        for tag in (meta.get("hashtags") or []):
             if isinstance(tag, str) and tag.strip():
                 hashtag_scores[tag.strip().lstrip("#")].append(er)
 
-        hook = (meta.get("hook_text") or "").strip()
+        hook = (meta.get("hook_text") or meta.get("title") or "").strip()
         if hook:
             hook_scores[hook[:140]].append(er)
+
+        keyword = (meta.get("keyword") or "").strip()
+        if keyword:
+            topic_scores[keyword].append(er)
+        story_id = (meta.get("story_id") or "").strip() if isinstance(meta.get("story_id"), str) else meta.get("story_id")
+        if story_id:
+            story_scores[str(story_id)].append(er)
+
+        scene_count = meta.get("scene_count")
+        try:
+            if scene_count is not None:
+                scene_scores[int(scene_count)].append(er)
+        except Exception:
+            pass
 
         published_at = meta.get("published_at") or meta.get("scheduled_for")
         try:
@@ -157,79 +232,108 @@ async def _feedback_loop_async(account_handle: str) -> dict:
         except Exception:
             pass
 
-    for fmt, rates in format_stats.items():
-        avg = sum(rates) / len(rates)
-        log.info("format_performance", account=account_handle, format=fmt, avg_er=round(avg, 4))
-
-    # En iyi saati bul
-    # (Gerçekte post zamanı da kaydedilmeli — burada placeholder)
-
-    # Sonuçları Redis'e kaydet
     await redis.setex(
         f"feedback_stats:{account_handle}",
         7 * 86400,
-        json.dumps({
-            "format_stats": {k: sum(v)/len(v) for k, v in format_stats.items()},
-            "post_type_performance": {
-                k: (sum(v) / len(v) if v else 0.0)
-                for k, v in post_type_stats.items()
-            },
-            "total_posts": len(metrics_list),
-        }),
+        json.dumps(
+            {
+                "format_stats": {k: sum(v) / len(v) for k, v in format_stats.items() if v},
+                "platform_stats": {k: sum(v) / len(v) for k, v in platform_stats.items() if v},
+                "mode_stats": {k: sum(v) / len(v) for k, v in mode_stats.items() if v},
+                "post_type_performance": {
+                    k: (sum(v) / len(v) if v else 0.0) for k, v in post_type_stats.items()
+                },
+                "total_posts": len(metrics_list),
+            }
+        ),
     )
 
     await _persist_hashtag_weights(redis, account_handle, hashtag_scores)
     await _persist_hook_bank(redis, account_handle, hook_scores)
     await _persist_hour_weights(redis, account_handle, hour_scores)
+    await _persist_topic_weights(redis, account_handle, topic_scores)
+    await _persist_mode_weights(redis, account_handle, mode_stats)
+    await _persist_story_weights(redis, account_handle, story_scores)
+    await _persist_scene_targets(redis, account_handle, scene_scores)
 
     log.info("feedback_loop_done", account=account_handle, posts=len(metrics_list))
     return {"updated": True, "posts_analyzed": len(metrics_list)}
 
 
-def _weighted_score(
-    likes: int,
-    comments: int,
-    saves: int,
-    shares: int,
-    impressions: int,
-) -> float:
-    """
-    Save/share odaklı skorlama:
-    hızlı büyüme için saves ve shares'e daha yüksek ağırlık ver.
-    """
+def _parse_instagram_insights(insights: dict) -> dict | None:
+    if not insights or "data" not in insights:
+        return None
+
+    metrics = {}
+    for item in insights["data"]:
+        name = item.get("name")
+        values = item.get("values") or []
+        value = values[-1]["value"] if values else 0
+        metrics[name] = value
+
+    impressions = int(metrics.get("impressions", 0) or 0)
+    likes = int(metrics.get("likes", 0) or 0)
+    comments = int(metrics.get("comments", 0) or 0)
+    saves = int(metrics.get("saved", 0) or 0)
+    shares = int(metrics.get("shares", 0) or 0)
+    reach = int(metrics.get("reach", 0) or 0)
+
+    engagement_rate = ((likes + comments + saves + shares) / impressions) if impressions > 0 else 0.0
+    ctr_proxy = (shares + saves) / impressions if impressions > 0 else 0.0
+
+    return {
+        "impressions": impressions,
+        "reach": reach,
+        "likes": likes,
+        "comments": comments,
+        "saves": saves,
+        "shares": shares,
+        "engagement_rate": engagement_rate,
+        "ctr_proxy": ctr_proxy,
+        "retention_proxy": min((saves + shares * 1.2) / max(impressions, 1), 1.0),
+        "completion_proxy": min((saves + shares * 1.2) / max(impressions, 1), 1.0),
+    }
+
+
+def _weighted_score(likes: int, comments: int, saves: int, shares: int, impressions: int) -> float:
     if impressions <= 0:
         return 0.0
     weighted = likes + (comments * 1.8) + (saves * 2.8) + (shares * 3.0)
     return weighted / impressions
 
 
+async def _json_get(redis, key: str) -> dict | None:
+    raw = await redis.get(key)
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+
 async def _load_published_meta(redis, account_handle: str) -> dict[str, dict]:
     result: dict[str, dict] = {}
-    keys = await redis.keys("published:*")
-    for key in keys:
-        data_str = await redis.get(key)
-        if not data_str:
-            continue
-        try:
-            data = json.loads(data_str)
-        except json.JSONDecodeError:
-            continue
-        if data.get("account") != account_handle:
-            continue
-        media_id = data.get("media_id")
-        if media_id:
-            result[str(media_id)] = data
+
+    for pattern, id_field in [
+        ("published:*", "media_id"),
+        ("published_instagram:*", "media_id"),
+        ("published_youtube:*", "video_id"),
+    ]:
+        keys = await redis.keys(pattern)
+        for key in keys:
+            data = await _json_get(redis, key)
+            if not data or data.get("account") != account_handle:
+                continue
+            media_id = data.get(id_field)
+            if media_id:
+                result[str(media_id)] = data
+
     return result
 
 
-async def _persist_hashtag_weights(
-    redis,
-    account_handle: str,
-    hashtag_scores: dict[str, list[float]],
-) -> None:
+async def _persist_hashtag_weights(redis, account_handle: str, hashtag_scores: dict[str, list[float]]) -> None:
     key = f"feedback:hashtag_weights:{account_handle}"
-    if not hashtag_scores:
-        return
     payload: dict[str, float] = {}
     for tag, scores in hashtag_scores.items():
         if len(scores) < 2:
@@ -240,11 +344,7 @@ async def _persist_hashtag_weights(
         await redis.expire(key, 30 * 86400)
 
 
-async def _persist_hook_bank(
-    redis,
-    account_handle: str,
-    hook_scores: dict[str, list[float]],
-) -> None:
+async def _persist_hook_bank(redis, account_handle: str, hook_scores: dict[str, list[float]]) -> None:
     key = f"feedback:hook_bank:{account_handle}"
     if not hook_scores:
         return
@@ -252,20 +352,13 @@ async def _persist_hook_bank(
     for hook, scores in hook_scores.items():
         if len(scores) < 2:
             continue
-        score = sum(scores) / len(scores)
-        pipe.zadd(key, {hook: score})
+        pipe.zadd(key, {hook: sum(scores) / len(scores)})
     pipe.expire(key, 30 * 86400)
     await pipe.execute()
 
 
-async def _persist_hour_weights(
-    redis,
-    account_handle: str,
-    hour_scores: dict[int, list[float]],
-) -> None:
+async def _persist_hour_weights(redis, account_handle: str, hour_scores: dict[int, list[float]]) -> None:
     key = f"feedback:hour_weights:{account_handle}"
-    if not hour_scores:
-        return
     payload = {}
     for hour, scores in hour_scores.items():
         if len(scores) < 2:
@@ -273,4 +366,67 @@ async def _persist_hour_weights(
         payload[str(hour)] = min(max(sum(scores) / len(scores) * 10, 0.5), 5.0)
     if payload:
         await redis.hset(key, mapping=payload)
+        await redis.expire(key, 30 * 86400)
+
+
+async def _persist_topic_weights(redis, account_handle: str, topic_scores: dict[str, list[float]]) -> None:
+    key = f"feedback:topic_weights:{account_handle}"
+    payload: dict[str, float] = {}
+    for topic, scores in topic_scores.items():
+        if len(scores) < 2:
+            continue
+        payload[topic] = min(max(sum(scores) / len(scores) * 8.0, 0.2), 5.0)
+    if payload:
+        await redis.hset(key, mapping=payload)
+        await redis.expire(key, 30 * 86400)
+
+
+async def _persist_mode_weights(redis, account_handle: str, mode_scores: dict[str, list[float]]) -> None:
+    key = f"feedback:mode_weights:{account_handle}"
+    payload: dict[str, float] = {}
+    for mode, scores in mode_scores.items():
+        if len(scores) < 2:
+            continue
+        payload[mode] = min(max(sum(scores) / len(scores) * 10.0, 0.2), 5.0)
+    if payload:
+        await redis.hset(key, mapping=payload)
+        await redis.expire(key, 30 * 86400)
+
+
+async def _persist_story_weights(redis, account_handle: str, story_scores: dict[str, list[float]]) -> None:
+    key = f"feedback:story_weights:{account_handle}"
+    payload: dict[str, float] = {}
+    for story_id, scores in story_scores.items():
+        if len(scores) < 2:
+            continue
+        payload[story_id] = min(max(sum(scores) / len(scores) * 10.0, 0.2), 5.0)
+    if payload:
+        await redis.hset(key, mapping=payload)
+        await redis.expire(key, 30 * 86400)
+
+
+async def _persist_scene_targets(redis, account_handle: str, scene_scores: dict[int, list[float]]) -> None:
+    key = f"feedback:scene_targets:{account_handle}"
+    if not scene_scores:
+        return
+
+    best_scene = None
+    best_score = -1.0
+    for scene_count, scores in scene_scores.items():
+        if len(scores) < 2:
+            continue
+        avg = sum(scores) / len(scores)
+        if avg > best_score:
+            best_score = avg
+            best_scene = scene_count
+
+    if best_scene is not None:
+        await redis.hset(
+            key,
+            mapping={
+                "target_scene_count": best_scene,
+                "updated_at": datetime.utcnow().isoformat(),
+                "score": round(best_score, 6),
+            },
+        )
         await redis.expire(key, 30 * 86400)

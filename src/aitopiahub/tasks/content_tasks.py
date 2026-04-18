@@ -10,7 +10,7 @@ import random
 from datetime import datetime, timedelta, timezone
 
 from aitopiahub.tasks.celery_app import app
-from aitopiahub.core.config import AccountConfig
+from aitopiahub.core.config import AccountConfig, get_settings
 from aitopiahub.core.constants import PostFormat
 from aitopiahub.core.logging import get_logger
 from aitopiahub.core.redis_client import get_redis
@@ -198,9 +198,11 @@ async def _generate_async(account_handle: str) -> dict:
                 target_queue = f"review_drafts:{account_handle}" if approval_mode else f"ready_drafts:{account_handle}"
                 await redis.rpush(target_queue, json.dumps(draft_data))
                 
-                # YouTube Phase-2 Integration: Trigger video generation
-                from aitopiahub.tasks.youtube_tasks import generate_and_publish_shorts
-                generate_and_publish_shorts.delay(account_handle, json.dumps(draft_data))
+                # Shorts pipeline opsiyonel (default: kapalı)
+                settings = get_settings()
+                if settings.enable_shorts_pipeline:
+                    from aitopiahub.tasks.youtube_tasks import generate_and_publish_shorts
+                    generate_and_publish_shorts.delay(account_handle, json.dumps(draft_data))
 
                 generated_count += 1
                 log.info(
@@ -209,7 +211,7 @@ async def _generate_async(account_handle: str) -> dict:
                     variant=post.variant_label,
                     approval_mode=approval_mode,
                     affiliate=bool(affiliate_meta),
-                    youtube_triggered=True
+                    youtube_triggered=bool(settings.enable_shorts_pipeline),
                 )
 
     log.info("content_pipeline_done", account=account_handle, generated=generated_count)
@@ -374,10 +376,66 @@ def run_autonomous_kids_cycle(account_handle: str):
     manager = EpisodeManager(account_handle)
     return asyncio.run(manager.run_automated_cycle())
 
+
+@app.task(
+    name="aitopiahub.tasks.content_tasks.run_kids_language_cycle",
+    bind=True,
+    max_retries=2,
+)
+def run_kids_language_cycle(self, account_handle: str, lang: str, content_mode: str = "demand_driven") -> dict:
+    """Günlük slot bazlı tek dil üretim görevi (TR/EN + mode)."""
+    return asyncio.run(_run_kids_language_cycle_async(self, account_handle, lang, content_mode))
+
 @app.task(name="aitopiahub.tasks.content_tasks.run_self_improvement")
 def run_self_improvement(account_handle: str):
     """Zeka katmanını çalıştırarak takvimi optimize eder."""
     from aitopiahub.content_engine.agents.feedback_agent import FeedbackAgent
-    agent = FeedbackAgent()
-    # Simüle edilmiş stats (Gerçek API entegrasyonu engagement_tasks içinde genişletilebilir)
+    agent = FeedbackAgent(account_handle=account_handle)
     return asyncio.run(agent.analyze_and_optimize({}, {}))
+
+
+async def _run_kids_language_cycle_async(
+    task_ctx,
+    account_handle: str,
+    lang: str,
+    content_mode: str = "demand_driven",
+) -> dict:
+    from aitopiahub.content_engine.episode_manager import EpisodeManager
+
+    settings = get_settings()
+    redis = get_redis()
+    day_key = datetime.now(timezone.utc).strftime("%Y%m%d")
+    mode = (content_mode or "demand_driven").strip().lower()
+    if mode not in {"fairy_tale", "demand_driven"}:
+        mode = "demand_driven"
+
+    retry_key = f"retry_budget:kids:{account_handle}:{lang}:{mode}:{day_key}"
+    dlq_key = f"dlq:kids:{account_handle}"
+
+    try:
+        manager = EpisodeManager(account_handle)
+        url = await manager.run_daily_flow(lang=lang, content_mode=mode)
+        if not url:
+            raise RuntimeError("empty_publish_url")
+
+        await redis.delete(retry_key)
+        return {"ok": True, "lang": lang, "mode": mode, "url": url}
+    except Exception as exc:
+        failures = await redis.incr(retry_key)
+        await redis.expire(retry_key, 2 * 86400)
+        payload = {
+            "account": account_handle,
+            "lang": lang,
+            "content_mode": mode,
+            "error": str(exc),
+            "failures": failures,
+            "task_retries": task_ctx.request.retries,
+            "at": datetime.now(timezone.utc).isoformat(),
+        }
+        if failures > settings.kids_retry_budget or task_ctx.request.retries >= settings.kids_retry_budget:
+            await redis.rpush(dlq_key, json.dumps(payload))
+            log.error("kids_cycle_dead_lettered", **payload)
+            raise
+
+        log.warning("kids_cycle_retrying", **payload)
+        raise task_ctx.retry(exc=exc, countdown=min(300, 30 * (task_ctx.request.retries + 1)))

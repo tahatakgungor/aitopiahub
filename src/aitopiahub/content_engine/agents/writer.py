@@ -58,6 +58,9 @@ class WriterAgent:
         angle: ContentAngle = ContentAngle.INFORMATIVE,
         language: str = "tr",
         proven_hooks: list[str] | None = None,
+        content_mode: str = "demand_driven",
+        story_profile: dict | None = None,
+        fairy_style: str = "modern_educational",
     ) -> WriterOutput:
         """İçerik taslağı üret."""
 
@@ -66,7 +69,15 @@ class WriterAgent:
         elif post_format == PostFormat.SHORT_SCRIPT:
             return await self._write_short_script(note, angle, language, proven_hooks)
         elif post_format == PostFormat.LONG_EPISODE:
-            return await self._write_long_episode(note, angle, language, proven_hooks)
+            return await self._write_long_episode(
+                note,
+                angle,
+                language,
+                proven_hooks,
+                content_mode=content_mode,
+                story_profile=story_profile,
+                fairy_style=fairy_style,
+            )
         else:
             return await self._write_single(note, angle, language, proven_hooks)
 
@@ -76,10 +87,33 @@ class WriterAgent:
         angle: ContentAngle,
         language: str,
         proven_hooks: list[str] | None,
+        content_mode: str = "demand_driven",
+        story_profile: dict | None = None,
+        fairy_style: str = "modern_educational",
     ) -> WriterOutput:
+        story_constraints = ""
+        if content_mode == "fairy_tale" and story_profile:
+            chars = ", ".join(story_profile.get("characters", []))
+            blocked = ", ".join(story_profile.get("blocked_elements", []))
+            moral = story_profile.get("moral", "")
+            story_constraints = f"""
+Masal modu aktif. Hikaye kimliği: {story_profile.get("id")}
+Karakterler: {chars}
+Kaçınılacak unsurlar: {blocked}
+Pedagojik mesaj: {moral}
+Stil: {fairy_style}
+Ek Kurallar:
+- Klasik hikayeyi modern ve çocuk güvenliğine uygun şekilde anlat.
+- Korku/şiddet içeren kısımları yumuşat.
+- Finalde tam 1 ders cümlesi ve 1 etkileşim sorusu ekle.
+- Sahne metinleri ve görseller birbirini birebir tamamlasın.
+"""
+
         prompt = f"""Konu: "{note.keyword}"
 Detaylar: {note.main_finding}
 Dil: {"Türkçe" if language == "tr" else "English"}
+İçerik modu: {content_mode}
+{story_constraints}
 
 YouTube için 5 dakikalık çocuk eğitim/hikaye videosu (Episode) senaryosu yaz.
 Kurallar:
