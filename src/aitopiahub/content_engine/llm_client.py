@@ -94,6 +94,9 @@ class LLMClient:
             if "tokens per day" in err_str and groq_model == GROQ_MODELS[ModelTier.QUALITY]:
                 log.warning("groq_70b_daily_limit_falling_back_to_8b", error=err_str[:120])
                 kwargs["model"] = GROQ_MODELS[ModelTier.FAST]
+                # llama-3.1-8b-instant has a smaller per-request window; cap
+                # max_tokens at 4096 to avoid 413 "Request too large" errors.
+                kwargs["max_tokens"] = min(kwargs.get("max_tokens", 800), 4096)
                 try:
                     resp = await self._groq.chat.completions.create(**kwargs)
                     content = resp.choices[0].message.content or ""

@@ -282,19 +282,36 @@ class AssemblyEngine:
         quiet_factor = 10 ** (ducking_db / 20.0)
 
         def _frame(t):
-            # t can be a scalar float or a 1-D numpy array (batch rendering)
-            t_arr = np.atleast_1d(np.asarray(t, dtype=float))
-            gain = np.ones(len(t_arr), dtype=float)
-            for start, end in speech_segments:
-                mask = (t_arr >= start) & (t_arr <= end)
-                gain[mask] = quiet_factor
+            # t may be a Python scalar, a 0-d numpy array, or a 1-D numpy array
+            # of timestamps (batch rendering).  Handle all three cases so we never
+            # hit "truth value of array is ambiguous" or "cannot squeeze axis".
+            import numpy as _np  # local import avoids shadowing module-level np
+
+            t_is_scalar = _np.ndim(t) == 0  # True for float / 0-d array
+
             raw = bg_music.get_frame(t)
-            # raw shape is (n_samples,) for mono or (n_samples, channels) for stereo
-            raw_arr = np.atleast_2d(raw) if raw.ndim == 1 else raw
-            gain_col = gain.reshape(-1, 1)
-            result = raw_arr * gain_col
-            # Return in same shape as input
-            return result if raw.ndim > 1 else result.squeeze(axis=-1)
+
+            if t_is_scalar:
+                # Scalar path: raw is (channels,) for stereo or () for mono.
+                # Compute a single gain value with plain Python logic.
+                t_val = float(t)
+                gain = quiet_factor if any(s <= t_val <= e for s, e in speech_segments) else 1.0
+                return _np.asarray(raw) * gain
+            else:
+                # Batch path: t is 1-D array of shape (n,).
+                # raw is (n,) for mono  or  (n, channels) for stereo.
+                t_arr = _np.asarray(t, dtype=float)
+                gain = _np.ones(len(t_arr), dtype=float)
+                for start, end in speech_segments:
+                    mask = (t_arr >= start) & (t_arr <= end)
+                    gain[mask] = quiet_factor
+                raw_arr = _np.asarray(raw)
+                if raw_arr.ndim == 1:
+                    # mono
+                    return raw_arr * gain
+                else:
+                    # stereo: shape (n, channels) → broadcast gain along axis 0
+                    return raw_arr * gain[:, _np.newaxis]
 
         return AudioClip(make_frame=_frame, duration=bg_music.duration, fps=44100)
 

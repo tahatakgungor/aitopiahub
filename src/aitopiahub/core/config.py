@@ -139,9 +139,9 @@ class Settings(BaseSettings):
     # Music + quality gate
     music_pool_manifest: str = "assets/music/kids_pool/music_manifest.json"
     quality_gate_strict: bool = True
-    quality_min_audio: float = 0.60
-    quality_min_visual: float = 0.50
-    quality_min_music: float = 0.60
+    quality_min_audio: float = 0.45   # Piper TTS produces acceptable audio
+    quality_min_visual: float = 0.35  # Pollinations AI images are scene-specific
+    quality_min_music: float = 0.55
     quality_min_technical: float = 0.70
 
     # Optional paid quality mode

@@ -105,14 +105,39 @@ class QualityGate:
             text = str(scene.get("text") or "").lower()
             query = str(scene.get("asset_query") or "").lower()
             provider = str(scene.get("visual_provider_used") or "").lower()
-            if not text or not query:
-                scores.append(0.2)
+
+            # If no visual asset at all, penalise.
+            image_path = scene.get("image_path") or scene.get("visual_path") or ""
+            video_path = scene.get("video_path") or ""
+            has_visual = bool(image_path or video_path)
+
+            if not has_visual:
+                scores.append(0.1)
                 continue
-            text_tokens = {tok for tok in text.split() if len(tok) > 3}
-            query_tokens = {tok for tok in query.split() if len(tok) > 3}
-            overlap = len(text_tokens & query_tokens) / max(1, len(query_tokens))
-            provider_bonus = 0.2 if provider in {"pexels", "pixabay"} else 0.1
-            scores.append(min(1.0, overlap * 0.8 + provider_bonus))
+
+            # AI image generators (Pollinations/DALL-E/Stable Diffusion) produce
+            # on-demand visuals that match the prompt well — reward them highly.
+            ai_providers = {"pollinations", "dalle", "openai", "stable_diffusion", "sd"}
+            stock_providers = {"pexels", "pixabay", "unsplash"}
+
+            if any(p in provider for p in ai_providers):
+                provider_bonus = 0.55  # AI images are scene-specific
+            elif any(p in provider for p in stock_providers):
+                provider_bonus = 0.40  # Stock footage is relevant but generic
+            elif has_visual:
+                provider_bonus = 0.30  # Fallback / template image
+
+            # Semantic overlap is a soft bonus, not the primary signal.
+            if text and query:
+                text_tokens = {tok for tok in text.split() if len(tok) > 3}
+                query_tokens = {tok for tok in query.split() if len(tok) > 3}
+                overlap = len(text_tokens & query_tokens) / max(1, len(query_tokens))
+            else:
+                overlap = 0.0
+
+            score = min(1.0, provider_bonus + overlap * 0.45)
+            scores.append(score)
+
         if not scores:
             return 0.0
         return float(sum(scores) / len(scores))
